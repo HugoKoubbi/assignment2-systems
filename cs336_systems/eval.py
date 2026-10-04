@@ -8,6 +8,10 @@ from cs336_basics.nn_utils import *
 from cs336_basics.optimizer import *
 from transformers import AutoTokenizer
 import numpy as np
+from tokenizers import Tokenizer
+from tokenizers.models import BPE
+from tokenizers.trainers import BpeTrainer
+from tokenizers.pre_tokenizers import Whitespace
 
 if __name__ == 'main':
     parser=argparse.ArgumentParser()
@@ -72,22 +76,40 @@ def benchmarking_script(config, w, n, mode,device=None):
     with open('cs336-basics/data/TinyStoriesV2-GPT4-train.txt','r', encoding="utf-8") as training_data:
         with open('cs336-basics/data/TinyStoriesV2-GPT4-valid.txt','r', encoding="utf-8") as test_data:
             # Prepare the tokenizer 
-            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+            #tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
             #model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
             #tokenizer = AutoTokenizer.from_pretrained(model_id, subfolder="original") 
-            print(f'Vocabulary size: {len(tokenizer.vocab)}') 
+            tokenizer = Tokenizer(BPE(unk_token="<|endoftext|>'"))
+            trainer = BpeTrainer(special_tokens=["<|endoftext|>'"],vocab_size=10000)
+            tokenizer.pre_tokenizer = Whitespace()
+            #files = [f"data/wikitext-103-raw/wiki.{split}.raw" for split in ["test", "train", "valid"]]
+            #training_data = training_data.read(batch_size * context_length)
+            file=['cs336-basics/data/TinyStoriesV2-GPT4-train.txt']
+            tokenizer.train(file, trainer) 
+            #tokenizer.train(files, trainer) 
+            tokenizer.save("cs336_systems/tokenizer-wiki.json")
+            tokenizer = Tokenizer.from_file("cs336_systems/tokenizer-wiki.json")
+
+
+
+            #print(f'Vocabulary size: {len(tokenizer.vocab)}') 
             #print(f'Merges size: {len(tokenizer.merges)}')
             print(f'Tokenizer initialized.')
-            # Tokenize the data
             training_data = training_data.read(batch_size * context_length)
+            # Tokenize the data
+            #training_data = training_data.read(batch_size * context_length)
             np.save('cs336-basics/data/training_tokenized' ,tokenizer.encode(training_data))
+            #print(tokenizer.encode(training_data))
+            #print(tokenizer.encode(training_data).ids)
+            #print(tokenizer.encode(training_data).tokens)
             #np.save('cs336-basics/data/test_tokenized',tokenizer.encode(test_data))
 
     # Tokenize the data
-    np.save('cs336-basics/data/training_tokenized.npy' ,tokenizer.encode(training_data))
+    np.save('cs336-basics/data/training_tokenized.npy' ,tokenizer.encode(training_data).ids)
     #np.save('cs336-basics/data/test_tokenized',tokenizer.encode(test_data))
-
+    print()
     training_tokenized_mm=np.load('cs336-basics/data/training_tokenized.npy',mmap_mode='r')
+
     if mode=='forward':
         with torch.no_grad():
             for step in range(w):
@@ -96,13 +118,13 @@ def benchmarking_script(config, w, n, mode,device=None):
                 print(inputs.device)
                 model(inputs)
                 torch.cuda.synchronize()  # Ensure all CUDA operations are complete before
-            timeit.timeit()
+            time_base=timeit.timeit()
             for step in range(n):
                 inputs,output=get_batch(training_tokenized_mm,batch_size,context_length,Device)
                 model(inputs)
                 torch.cuda.synchronize()  # Ensure all CUDA operations are complete before
             time_final=timeit.timeit()
-            return( time_final-time_taken)
+            return( time_final-time_base)
     elif mode=='forward_backward':
         inputs,output=get_batch(training_tokenized_mm,batch_size,context_length,Device)
         optimizer=AdamW(model.parameters(),lr=lr,betas=betas,weight_decay=wd)
